@@ -688,6 +688,8 @@ impl Page {
             }
         }
 
+        // TODO: Dialog will go here.
+
         cosmic::command::future(async move {
             tracing::debug!(?command, "executing");
             app::Message::from(Message::RandrResult(Arc::new(command.status().await)))
