@@ -10,7 +10,7 @@ use cosmic::iced::{Alignment, Length};
 use cosmic::iced_widget::scrollable::{Direction, Properties, RelativeOffset};
 use cosmic::prelude::CollectionWidget;
 use cosmic::widget::{
-    column, container, dropdown, list_column, segmented_button, tab_bar, toggler,
+    self, column, container, dropdown, list_column, segmented_button, tab_bar, toggler
 };
 use cosmic::{command, Apply, Command, Element};
 use cosmic_randr_shell::{List, Output, OutputKey, Transform};
@@ -66,6 +66,10 @@ pub enum Message {
     ColorDepth(ColorDepth),
     /// Set the color profile of a display.
     ColorProfile(usize),
+    /// The dialog was cancelled, and will revert setting to the given request.
+    DialogCancel(Randr),
+    /// The dialog was completed.
+    DialogComplete,
     /// Toggles display on or off.
     DisplayToggle(bool),
     /// Configures mirroring status of a display.
@@ -91,12 +95,6 @@ pub enum Message {
         /// Available outputs from cosmic-randr.
         randr: Arc<Result<List, cosmic_randr_shell::Error>>,
     },
-    /// Displays the next dialog on the queue.
-    ShowDialog,
-    /// The dialog was completed.
-    DialogComplete,
-    /// The dialog was cancelled, and will revert setting to the given request.
-    DialogCancel(Randr),
 }
 
 impl From<Message> for app::Message {
@@ -375,15 +373,16 @@ impl Page {
 
             Message::DialogComplete => {
                 println!("Dialog Confirmed");
+                self.dialog = None;
                 ()
             },
 
             Message::DialogCancel(request) => {
-                let Some(output) = self.list.outputs.
-                    get_mut(self.active_display) else {
+                let Some(output) = self.list.outputs.get(self.active_display) else {
                     return Command::none();
                 };
                 println!("Dialog Cancelled. Reverting");
+                self.dialog = None;
                 return self.exec_randr(output, request);
             },
         }
@@ -722,9 +721,6 @@ impl Page {
             }
         }
 
-        // Confirms display settings with user.
-        self.dialog_confirm();
-
         cosmic::command::future(async move {
             tracing::debug!(?command, "executing");
             app::Message::from(Message::RandrResult(Arc::new(command.status().await)))
@@ -734,16 +730,28 @@ impl Page {
     /// Opens a dialog to confirm the display settings.
     ///
     /// This dialog has a 10 (arbitrary) second counter which will 
-    /// automatically return to the original display settings when depleted.
-    fn dialog_confirm(&self) {
+    /// automatically revert to the original display settings when depleted.
+    fn dialog(&self) -> Option<Element<Message>> {
         // An arbitrarily chosen amound of time (in seconds) in which the user
         // has to confirm the new display settings before reverting.
         const DIALOG_CANCEL_TIME: Duration = Duration::from_secs(10);
-        let Some(request) = self.dialog else {
-            return;
+        let Some(revert_request) = self.dialog else {
+            return None;
         };
         eprintln!("The dialog is unfinished");
-        // TODO: Should make dialog with message::DialogComplete or DialogIncomplete
+        // TODO: Make fl! for "keep changes" once correct wording is found.
+        let dialog = widget::dialog("Keep Changes?")
+            .body(format!("Would you like to keep these display settings? Will automatically revert\
+ after {} seconds.", DIALOG_CANCEL_TIME.as_secs()))
+            .primary_action(
+                widget::button::suggested("Keep Changes")
+                    .on_press(Message::DialogComplete)
+            )
+            .secondary_action(
+                widget::button("Revert Settings")
+                    .on_press(Message::DialogCancel(revert_request))
+            );
+        Some(dialog.into())
     }
 
 }
