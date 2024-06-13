@@ -22,7 +22,6 @@ use std::{
     process::ExitStatus, 
     sync::Arc,
     time::Duration,
-    thread,
 };
 
 /// Display color depth options
@@ -527,6 +526,16 @@ impl Page {
             return Command::none();
         };
 
+        if let Some(orientation) = self.cache.orientation_selected {
+            let current_orientation = match orientation {
+                1 => Transform::Rotate90,
+                2 => Transform::Flipped180,
+                3 => Transform::Flipped270,
+                _ => Transform::Normal,
+            };
+            self.dialog = Some(Randr::Transform(current_orientation));
+        }
+
         self.cache.orientation_selected = match transform {
             Transform::Normal => Some(0),
             Transform::Rotate90 => Some(1),
@@ -549,6 +558,8 @@ impl Page {
             tracing::debug!("set position {x},{y}");
             return Command::none();
         }
+        
+        // TODO: Find current display position.
 
         let output = &self.list.outputs[display];
         self.exec_randr(output, Randr::Position(x, y))
@@ -563,6 +574,9 @@ impl Page {
         if let Some(ref resolution) = self.config.resolution {
             if let Some(rates) = self.cache.modes.get(resolution) {
                 if let Some(&rate) = rates.get(option) {
+                    if let Some(current_rate) = self.config.refresh_rate {
+                        self.dialog = Some(Randr::RefreshRate(current_rate));
+                    }
                     self.cache.refresh_rate_selected = Some(option);
                     self.config.refresh_rate = Some(rate);
                     return self.exec_randr(output, Randr::RefreshRate(rate));
@@ -625,6 +639,7 @@ impl Page {
         output.enabled = enable;
 
         let output = &self.list.outputs[self.active_display];
+        self.dialog = Some(Randr::Toggle(!output.enabled));
         self.exec_randr(output, Randr::Toggle(output.enabled))
     }
 
