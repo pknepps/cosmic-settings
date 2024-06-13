@@ -17,8 +17,12 @@ use cosmic_randr_shell::{List, Output, OutputKey, Transform};
 use cosmic_settings_page::{self as page, section, Section};
 use slab::Slab;
 use slotmap::{Key, SlotMap};
-use std::collections::BTreeMap;
-use std::{process::ExitStatus, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    process::ExitStatus, 
+    sync::Arc,
+    time::Duration,
+};
 
 /// Display color depth options
 #[derive(Clone, Copy, Debug)]
@@ -86,6 +90,10 @@ pub enum Message {
         /// Available outputs from cosmic-randr.
         randr: Arc<Result<List, cosmic_randr_shell::Error>>,
     },
+    /// The dialog was completed.
+    DialogComplete,
+    /// The dialog was cancelled.
+    DialogCancel,
 }
 
 impl From<Message> for app::Message {
@@ -358,6 +366,18 @@ impl Page {
                     fl!("orientation", "rotate-270"),
                 ];
             }
+
+            // TODO: this should save settings.
+            Message::DialogComplete => {
+                println!("Dialog Confirmed");
+                ()
+            },
+
+            // TODO: this should revert to previous settings.
+            Message::DialogCancel => {
+                println!("Dialog Cancelled. Reverting");
+                ()
+            },
         }
 
         cosmic::iced::widget::scrollable::snap_to(
@@ -688,12 +708,25 @@ impl Page {
             }
         }
 
-        // TODO: Dialog will go here.
+        // Confirms display settings with user.
+        self.update(self.dialog_confirm());
 
         cosmic::command::future(async move {
             tracing::debug!(?command, "executing");
             app::Message::from(Message::RandrResult(Arc::new(command.status().await)))
         })
+    }
+
+    /// Opens a dialog to confirm the display settings.
+    ///
+    /// This dialog has a 10 (arbitrary) second counter which will 
+    /// automatically return the original display settings when depleted.
+    fn dialog_confirm(&self) -> Message {
+        // An arbitrarily chosen amound of time (in seconds) in which the user
+        // has to confirm the new display settings before reverting.
+        const DIALOG_CANCEL_TIME: Duration = Duration::from_secs(10);
+        eprintln!("The dialog is unfinished");
+        Message::DialogComplete
     }
 }
 
