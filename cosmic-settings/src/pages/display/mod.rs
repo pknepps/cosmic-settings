@@ -22,6 +22,7 @@ use std::{
     process::ExitStatus, 
     sync::Arc,
     time::Duration,
+    thread,
 };
 
 /// Display color depth options
@@ -90,10 +91,12 @@ pub enum Message {
         /// Available outputs from cosmic-randr.
         randr: Arc<Result<List, cosmic_randr_shell::Error>>,
     },
+    /// Displays the next dialog on the queue.
+    ShowDialog,
     /// The dialog was completed.
     DialogComplete,
-    /// The dialog was cancelled.
-    DialogCancel,
+    /// The dialog was cancelled, and will revert setting to the given request.
+    DialogCancel(Randr),
 }
 
 impl From<Message> for app::Message {
@@ -103,7 +106,7 @@ impl From<Message> for app::Message {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Randr {
     Position(i32, i32),
     RefreshRate(u32),
@@ -123,6 +126,8 @@ pub struct Page {
     cache: ViewCache,
     //  context: Option<ContextDrawer>,
     display_arrangement_scrollable: cosmic::widget::Id,
+    /// The setting to revert to if the next dialog page is cancelled.
+    dialog: Option<Randr>,
 }
 
 impl Default for Page {
@@ -136,6 +141,7 @@ impl Default for Page {
             cache: ViewCache::default(),
             //          context: None,
             display_arrangement_scrollable: cosmic::widget::Id::unique(),
+            dialog: None,
         }
     }
 }
@@ -367,16 +373,18 @@ impl Page {
                 ];
             }
 
-            // TODO: this should save settings.
             Message::DialogComplete => {
                 println!("Dialog Confirmed");
                 ()
             },
 
-            // TODO: this should revert to previous settings.
-            Message::DialogCancel => {
+            Message::DialogCancel(request) => {
+                let Some(output) = self.list.outputs.
+                    get_mut(self.active_display) else {
+                    return Command::none();
+                };
                 println!("Dialog Cancelled. Reverting");
-                ()
+                return self.exec_randr(output, request);
             },
         }
 
@@ -583,6 +591,10 @@ impl Page {
             return Command::none();
         };
 
+        if let Some((current_width, current_height)) = self.config.resolution {
+            self.dialog = Some(Randr::Resolution(current_width, current_height));
+        };
+
         self.config.refresh_rate = Some(rate);
         self.config.resolution = Some(resolution);
         self.cache.refresh_rate_selected = Some(0);
@@ -597,6 +609,8 @@ impl Page {
         };
 
         let scale = (option * 25 + 50) as u32;
+
+        self.dialog = Some(Randr::Scale(self.config.scale as u32));
 
         self.cache.scale_selected = Some(option);
         self.config.scale = scale;
@@ -709,7 +723,7 @@ impl Page {
         }
 
         // Confirms display settings with user.
-        self.update(self.dialog_confirm());
+        self.dialog_confirm();
 
         cosmic::command::future(async move {
             tracing::debug!(?command, "executing");
@@ -720,14 +734,18 @@ impl Page {
     /// Opens a dialog to confirm the display settings.
     ///
     /// This dialog has a 10 (arbitrary) second counter which will 
-    /// automatically return the original display settings when depleted.
-    fn dialog_confirm(&self) -> Message {
+    /// automatically return to the original display settings when depleted.
+    fn dialog_confirm(&self) {
         // An arbitrarily chosen amound of time (in seconds) in which the user
         // has to confirm the new display settings before reverting.
         const DIALOG_CANCEL_TIME: Duration = Duration::from_secs(10);
+        let Some(request) = self.dialog else {
+            return;
+        };
         eprintln!("The dialog is unfinished");
-        Message::DialogComplete
+        // TODO: Should make dialog with message::DialogComplete or DialogIncomplete
     }
+
 }
 
 /// View for the display arrangement section.
