@@ -296,6 +296,32 @@ impl page::Page<crate::pages::Message> for Page {
     //            None => return None,
     //        })
     //    }
+
+    /// Opens a dialog to confirm the display settings.
+    ///
+    /// This dialog has a 10 (arbitrary) second counter which will 
+    /// automatically revert to the original display settings when depleted.
+    fn dialog(&self) -> Option<Element<pages::Message>> {
+        // An arbitrarily chosen amound of time (in seconds) in which the user
+        // has to confirm the new display settings before reverting.
+        const DIALOG_CANCEL_TIME: Duration = Duration::from_secs(10);
+        let Some(revert_request) = self.dialog else {
+            return None;
+        };
+        // TODO: Make fl! for "keep changes" once correct wording is found.
+        let dialog = widget::dialog("Keep Changes?")
+            .body(format!("Would you like to keep these display settings? Will automatically revert\
+ after {} seconds.", DIALOG_CANCEL_TIME.as_secs()))
+            .primary_action(
+                widget::button::suggested("Keep Changes")
+                    .on_press(pages::Message::Displays(Message::DialogComplete))
+            )
+            .secondary_action(
+                widget::button("Revert Settings")
+                    .on_press(pages::Message::Displays(Message::DialogCancel(revert_request)))
+            );
+        Some(dialog.into())
+    }
 }
 
 impl Page {
@@ -736,37 +762,14 @@ impl Page {
             }
         }
 
+        if let Some(request) = self.dialog {
+            println!("request: {request:?}");
+        }
+
         cosmic::command::future(async move {
             tracing::debug!(?command, "executing");
             app::Message::from(Message::RandrResult(Arc::new(command.status().await)))
         })
-    }
-
-    /// Opens a dialog to confirm the display settings.
-    ///
-    /// This dialog has a 10 (arbitrary) second counter which will 
-    /// automatically revert to the original display settings when depleted.
-    fn dialog(&self) -> Option<Element<Message>> {
-        // An arbitrarily chosen amound of time (in seconds) in which the user
-        // has to confirm the new display settings before reverting.
-        const DIALOG_CANCEL_TIME: Duration = Duration::from_secs(10);
-        let Some(revert_request) = self.dialog else {
-            return None;
-        };
-        eprintln!("The dialog is unfinished");
-        // TODO: Make fl! for "keep changes" once correct wording is found.
-        let dialog = widget::dialog("Keep Changes?")
-            .body(format!("Would you like to keep these display settings? Will automatically revert\
- after {} seconds.", DIALOG_CANCEL_TIME.as_secs()))
-            .primary_action(
-                widget::button::suggested("Keep Changes")
-                    .on_press(Message::DialogComplete)
-            )
-            .secondary_action(
-                widget::button("Revert Settings")
-                    .on_press(Message::DialogCancel(revert_request))
-            );
-        Some(dialog.into())
     }
 
 }
