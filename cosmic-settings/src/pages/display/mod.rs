@@ -308,16 +308,14 @@ impl page::Page<crate::pages::Message> for Page {
         let Some(revert_request) = self.dialog else {
             return None;
         };
-        // TODO: Make fl! for "keep changes" once correct wording is found.
-        let dialog = widget::dialog("Keep Changes?")
-            .body(format!("Would you like to keep these display settings? Will automatically revert\
- after {} seconds.", DIALOG_CANCEL_TIME.as_secs()))
+        let dialog = widget::dialog(fl!("dialog", "keep-changes"))
+            .body(fl!("dialog", "change-prompt", time = DIALOG_CANCEL_TIME.as_secs()))
             .primary_action(
-                widget::button::suggested("Keep Changes")
+                widget::button::suggested(fl!("dialog", "keep-changes"))
                     .on_press(pages::Message::Displays(Message::DialogComplete))
             )
             .secondary_action(
-                widget::button("Revert Settings")
+                widget::button::standard(fl!("dialog", "revert-settings"))
                     .on_press(pages::Message::Displays(Message::DialogCancel(revert_request)))
             );
         Some(dialog.into())
