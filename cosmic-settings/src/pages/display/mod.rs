@@ -308,7 +308,7 @@ impl page::Page<crate::pages::Message> for Page {
         let Some(revert_request) = self.dialog else {
             return None;
         };
-        let dialog = widget::dialog(fl!("dialog", "keep-changes"))
+        let dialog = widget::dialog(fl!("dialog", "title"))
             .body(fl!("dialog", "change-prompt", time = DIALOG_CANCEL_TIME.as_secs()))
             .primary_action(
                 widget::button::suggested(fl!("dialog", "keep-changes"))
