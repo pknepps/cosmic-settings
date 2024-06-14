@@ -334,7 +334,19 @@ impl Page {
                         crate::Message::PageMessage(on_enter().await)
                     });
                 }
-            }
+            },
+
+            Message::DialogCancel(request) => {
+                let Some(output) = self.list.outputs.get(self.active_display) else {
+                    return Command::none();
+                };
+                self.dialog = None;
+                return self.exec_randr(output, request);
+            },
+
+            Message::DialogComplete => {
+                self.dialog = None;
+            },
 
             Message::Display(display) => self.set_display(display),
 
@@ -393,21 +405,6 @@ impl Page {
                     fl!("orientation", "rotate-270"),
                 ];
             }
-
-            Message::DialogComplete => {
-                println!("Dialog Confirmed");
-                self.dialog = None;
-                ()
-            },
-
-            Message::DialogCancel(request) => {
-                let Some(output) = self.list.outputs.get(self.active_display) else {
-                    return Command::none();
-                };
-                println!("Dialog Cancelled. Reverting");
-                self.dialog = None;
-                return self.exec_randr(output, request);
-            },
         }
 
         cosmic::iced::widget::scrollable::snap_to(
@@ -758,10 +755,6 @@ impl Page {
                     .arg(itoa::Buffer::new().format(current.size.0))
                     .arg(itoa::Buffer::new().format(current.size.1));
             }
-        }
-
-        if let Some(request) = self.dialog {
-            println!("request: {request:?}");
         }
 
         cosmic::command::future(async move {
