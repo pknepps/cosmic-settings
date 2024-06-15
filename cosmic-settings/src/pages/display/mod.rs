@@ -6,7 +6,8 @@ pub mod arrangement;
 
 use crate::{app, pages};
 use arrangement::Arrangement;
-use cosmic::iced::{Alignment, Length};
+use cosmic::iced::wayland::window::start_drag_window;
+use cosmic::iced::{ Alignment, Length, time };
 use cosmic::iced_widget::scrollable::{Direction, Properties, RelativeOffset};
 use cosmic::prelude::CollectionWidget;
 use cosmic::widget::{
@@ -21,7 +22,6 @@ use std::{
     collections::BTreeMap,
     process::ExitStatus, 
     sync::Arc,
-    time::Duration,
 };
 
 /// Display color depth options
@@ -304,12 +304,18 @@ impl page::Page<crate::pages::Message> for Page {
     fn dialog(&self) -> Option<Element<pages::Message>> {
         // An arbitrarily chosen amound of time (in seconds) in which the user
         // has to confirm the new display settings before reverting.
-        const DIALOG_CANCEL_TIME: Duration = Duration::from_secs(10);
+        const DIALOG_CANCEL_TIME: time::Duration = time::Duration::from_secs(10);
+        let start = time::Instant::now();
         let Some(revert_request) = self.dialog else {
             return None;
         };
         let dialog = widget::dialog(fl!("dialog", "title"))
-            .body(fl!("dialog", "change-prompt", time = DIALOG_CANCEL_TIME.as_secs()))
+            .body(fl!(
+                "dialog", 
+                "change-prompt", 
+                // Countdown
+                time = (DIALOG_CANCEL_TIME - start.elapsed()).as_secs()
+            ))
             .primary_action(
                 widget::button::suggested(fl!("dialog", "keep-changes"))
                     .on_press(pages::Message::Displays(Message::DialogComplete))
@@ -573,6 +579,11 @@ impl Page {
             return Command::none();
         };
 
+        // TODO: Find current display position.
+        // Attempt?
+        let (current_x, current_y) = output.position;
+        self.dialog = Some(Randr::Position(current_x, current_y)); 
+
         output.position = (x, y);
 
         if cfg!(feature = "test") {
@@ -580,7 +591,6 @@ impl Page {
             return Command::none();
         }
         
-        // TODO: Find current display position.
 
         let output = &self.list.outputs[display];
         self.exec_randr(output, Randr::Position(x, y))
