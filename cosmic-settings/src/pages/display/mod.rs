@@ -123,9 +123,20 @@ pub struct Page {
     cache: ViewCache,
     //  context: Option<ContextDrawer>,
     display_arrangement_scrollable: cosmic::widget::Id,
-    /// The setting to revert to if the next dialog page is cancelled.
-    dialog: Option<Randr>,
+    /// The setting to revert to if the next dialog page is cancelled, and the 
+    /// instant the setting was changed.
+    dialog: Option<(Randr, time::Instant)>,
 }
+
+
+/// Causes a dialog to be shown. If the dialog fails, the revert_action will
+/// be performed. 
+/// The revert_action should be which Randr call will revert the setting change.
+//macro_rules! set_dialog {
+//    ($self: ident, $Randr: ident { $($revert_action: $kind) }) => {
+        //$self.dialog = Some(($revert_action, time::Instant::now()))
+    //};
+//}
 
 impl Default for Page {
     fn default() -> Self {
@@ -301,12 +312,14 @@ impl page::Page<crate::pages::Message> for Page {
     ///
     /// This dialog has a 10 (arbitrary) second counter which will 
     /// automatically revert to the original display settings when depleted.
+    /// 
+    /// To make a setting activate this dialog. Call the set_dialog  macto with 
+    /// the Randr enum value which undos the current change.
     fn dialog(&self) -> Option<Element<pages::Message>> {
         // An arbitrarily chosen amound of time (in seconds) in which the user
         // has to confirm the new display settings before reverting.
-        const DIALOG_CANCEL_TIME: time::Duration = time::Duration::from_secs(10);
-        let start = time::Instant::now();
-        let Some(revert_request) = self.dialog else {
+        const DIALOG_CANCEL_TIME: time::Duration = time::Duration::from_secs(11);
+        let Some((revert_request, start)) = self.dialog else {
             return None;
         };
         let dialog = widget::dialog(fl!("dialog", "title"))
@@ -560,7 +573,7 @@ impl Page {
                 3 => Transform::Flipped270,
                 _ => Transform::Normal,
             };
-            self.dialog = Some(Randr::Transform(current_orientation));
+            self.dialog = Some((Randr::Transform(current_orientation), time::Instant::now()));
         }
 
         self.cache.orientation_selected = match transform {
@@ -582,7 +595,7 @@ impl Page {
         // TODO: Find current display position.
         // Attempt?
         let (current_x, current_y) = output.position;
-        self.dialog = Some(Randr::Position(current_x, current_y)); 
+        self.dialog = Some((Randr::Position(current_x, current_y), time::Instant::now())); 
 
         output.position = (x, y);
 
@@ -606,7 +619,7 @@ impl Page {
             if let Some(rates) = self.cache.modes.get(resolution) {
                 if let Some(&rate) = rates.get(option) {
                     if let Some(current_rate) = self.config.refresh_rate {
-                        self.dialog = Some(Randr::RefreshRate(current_rate));
+                        self.dialog = Some((Randr::RefreshRate(current_rate), time::Instant::now()));
                     }
                     self.cache.refresh_rate_selected = Some(option);
                     self.config.refresh_rate = Some(rate);
@@ -636,7 +649,7 @@ impl Page {
         };
 
         if let Some((current_width, current_height)) = self.config.resolution {
-            self.dialog = Some(Randr::Resolution(current_width, current_height));
+            self.dialog = Some((Randr::Resolution(current_width, current_height), time::Instant::now()));
         };
 
         self.config.refresh_rate = Some(rate);
@@ -654,7 +667,7 @@ impl Page {
 
         let scale = (option * 25 + 50) as u32;
 
-        self.dialog = Some(Randr::Scale(self.config.scale as u32));
+        self.dialog = Some((Randr::Scale(self.config.scale as u32), time::Instant::now()));
 
         self.cache.scale_selected = Some(option);
         self.config.scale = scale;
@@ -670,7 +683,7 @@ impl Page {
         output.enabled = enable;
 
         let output = &self.list.outputs[self.active_display];
-        self.dialog = Some(Randr::Toggle(!output.enabled));
+        self.dialog = Some((Randr::Toggle(!output.enabled), time::Instant::now()));
         self.exec_randr(output, Randr::Toggle(output.enabled))
     }
 
