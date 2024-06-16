@@ -971,13 +971,15 @@ struct ContinuousMessageStream<Message> {
 }
 
 impl<Message> ContinuousMessageStream<Message> {
-    /// Creates a new ContinuousMessageStream which will send the given message.
+    /// Creates a ContinuousMessageStream which will send the given message.
     fn new(message: Message) -> ContinuousMessageStream<Message> {
         ContinuousMessageStream { message }
     }
 }
 
-impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer> widget::Widget<Message, Theme, Renderer> for ContinuousMessageStream<Message> {
+impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer>
+    widget::Widget<Message, Theme, Renderer> for ContinuousMessageStream<Message> {
+
     fn size(&self) -> Size<Length> {
         Size::new(Length::Shrink, Length::Shrink)
     }
@@ -986,9 +988,29 @@ impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer> widget::Widge
         Node::new(Size::new(0f32, 0f32))
     }
 
-    fn draw(&self, _tree: &Tree, _renderer: &mut Renderer, _theme: &Theme, _style: &Style, _layout: Layout<'_>, _cursor: Cursor, _viewport: &Rectangle) {}
+    fn draw(
+        &self,
+        _tree: &Tree,
+        _renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &Style,
+        _layout: Layout<'_>,
+        _cursor: Cursor,
+        _viewport: &Rectangle
+    ) {}
 
-    fn on_event(&mut self, _state: &mut Tree, _event: Event, _layout: Layout<'_>, _cursor: Cursor, _renderer: &Renderer, _clipboard: &mut dyn Clipboard, shell: &mut Shell<'_, Message>, _viewport: &Rectangle) -> Status {
+    /// On any possible event, sends the message to the shell.
+    fn on_event(
+        &mut self,
+        _state: &mut Tree,
+        _event: Event,
+        _layout: Layout<'_>,
+        _cursor: Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle
+    ) -> Status {
         shell.publish(self.message.clone());
         Status::Captured
     }
