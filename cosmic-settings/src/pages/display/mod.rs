@@ -137,11 +137,23 @@ pub struct Page {
 /// Causes a dialog to be shown. If the dialog fails, the revert_action will
 /// be performed.
 /// The revert_action should be which Randr call will revert the setting change.
-//macro_rules! set_dialog {
-//    ($self: ident, $Randr: ident { $($revert_action: $kind) }) => {
-//$self.dialog = Some(($revert_action, time::Instant::now()))
-//};
-//}
+/// # Example
+/// ```
+/// fn set_scale(&mut self, scale: usize) -> Command<app::Message> {
+///
+///     // Sets the action to undo to the current value of the scale
+///     let revert_action = Randr::Scale(self.config.scale);
+///     set_dialog!(self, revert_action);
+///
+///     self.config.scale = scale;
+///     self.exec_randr(Randr::Scale(scale))
+/// }
+/// ```
+macro_rules! set_dialog {
+    ($self: ident, $revert_action: expr) => {
+        $self.dialog = Some(($revert_action, time::Instant::now()))
+    };
+}
 
 impl Default for Page {
     fn default() -> Self {
@@ -356,6 +368,7 @@ impl page::Page<crate::pages::Message> for Page {
 }
 
 impl Page {
+
     pub fn update(&mut self, message: Message) -> Command<app::Message> {
         match message {
             Message::RandrResult(result) => {
@@ -587,7 +600,7 @@ impl Page {
                 3 => Transform::Flipped270,
                 _ => Transform::Normal,
             };
-            self.dialog = Some((Randr::Transform(current_orientation), time::Instant::now()));
+            set_dialog!(self, Randr::Transform(current_orientation));
         }
 
         self.cache.orientation_selected = match transform {
@@ -609,7 +622,7 @@ impl Page {
         // TODO: Find current display position.
         // Attempt?
         let (current_x, current_y) = output.position;
-        self.dialog = Some((Randr::Position(current_x, current_y), time::Instant::now()));
+        set_dialog!(self, Randr::Position(current_x, current_y));
 
         output.position = (x, y);
 
@@ -632,8 +645,7 @@ impl Page {
             if let Some(rates) = self.cache.modes.get(resolution) {
                 if let Some(&rate) = rates.get(option) {
                     if let Some(current_rate) = self.config.refresh_rate {
-                        self.dialog =
-                            Some((Randr::RefreshRate(current_rate), time::Instant::now()));
+                        set_dialog!(self, Randr::RefreshRate(current_rate));
                     }
                     self.cache.refresh_rate_selected = Some(option);
                     self.config.refresh_rate = Some(rate);
@@ -663,10 +675,7 @@ impl Page {
         };
 
         if let Some((current_width, current_height)) = self.config.resolution {
-            self.dialog = Some((
-                Randr::Resolution(current_width, current_height),
-                time::Instant::now(),
-            ));
+            set_dialog!(self, Randr::Resolution(current_width, current_height));
         };
 
         self.config.refresh_rate = Some(rate);
@@ -684,7 +693,7 @@ impl Page {
 
         let scale = (option * 25 + 50) as u32;
 
-        self.dialog = Some((Randr::Scale(self.config.scale as u32), time::Instant::now()));
+        set_dialog!(self, Randr::Scale(self.config.scale));
 
         self.cache.scale_selected = Some(option);
         self.config.scale = scale;
@@ -699,8 +708,9 @@ impl Page {
 
         output.enabled = enable;
 
+        set_dialog!(self, Randr::Toggle(!output.enabled));
+
         let output = &self.list.outputs[self.active_display];
-        self.dialog = Some((Randr::Toggle(!output.enabled), time::Instant::now()));
         self.exec_randr(output, Randr::Toggle(output.enabled))
     }
 
