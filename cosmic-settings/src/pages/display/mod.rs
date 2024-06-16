@@ -332,11 +332,11 @@ impl page::Page<crate::pages::Message> for Page {
         let dialog: impl Into<Element<pages::Message>> = if time_elapsed.as_secs() < 11 {
             widget::dialog(fl!("dialog", "title"))
                 .body(fl!(
-                "dialog",
-                "change-prompt",
-                // Countdown
-                time = (DIALOG_CANCEL_TIME - time_elapsed).as_secs()
-            ))
+                    "dialog",
+                    "change-prompt",
+                    // Countdown
+                    time = (DIALOG_CANCEL_TIME - time_elapsed).as_secs()
+                ))
                 .primary_action(
                     widget::button::suggested(fl!("dialog", "keep-changes"))
                         .on_press(pages::Message::Displays(Message::DialogComplete))
@@ -346,9 +346,9 @@ impl page::Page<crate::pages::Message> for Page {
                         .on_press(pages::Message::Displays(Message::DialogCancel(revert_request)))
                 )
         } else {
-             ContinuousMessageStream::new(
-                 pages::Message::Displays(Message::DialogCancel(revert_request))
-             )
+            ContinuousMessageStream::new(
+                pages::Message::Displays(Message::DialogCancel(revert_request))
+            )
         };
         Some(dialog.into())
     }
@@ -971,13 +971,15 @@ struct ContinuousMessageStream<Message> {
 }
 
 impl<Message> ContinuousMessageStream<Message> {
-    /// Creates a new ContinuousMessageStream which will send the given message.
+    /// Creates a ContinuousMessageStream which will send the given message.
     fn new(message: Message) -> ContinuousMessageStream<Message> {
         ContinuousMessageStream { message }
     }
 }
 
-impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer> widget::Widget<Message, Theme, Renderer> for ContinuousMessageStream<Message> {
+impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer>
+    widget::Widget<Message, Theme, Renderer> for ContinuousMessageStream<Message> {
+
     fn size(&self) -> Size<Length> {
         Size::new(Length::Shrink, Length::Shrink)
     }
@@ -986,9 +988,29 @@ impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer> widget::Widge
         Node::new(Size::new(0f32, 0f32))
     }
 
-    fn draw(&self, _tree: &Tree, _renderer: &mut Renderer, _theme: &Theme, _style: &Style, _layout: Layout<'_>, _cursor: Cursor, _viewport: &Rectangle) {}
+    fn draw(
+        &self,
+        _tree: &Tree,
+        _renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &Style,
+        _layout: Layout<'_>,
+        _cursor: Cursor,
+        _viewport: &Rectangle
+    ) {}
 
-    fn on_event(&mut self, _state: &mut Tree, _event: Event, _layout: Layout<'_>, _cursor: Cursor, _renderer: &Renderer, _clipboard: &mut dyn Clipboard, shell: &mut Shell<'_, Message>, _viewport: &Rectangle) -> Status {
+    /// On any possible event, sends the message to the shell.
+    fn on_event(
+        &mut self,
+        _state: &mut Tree,
+        _event: Event,
+        _layout: Layout<'_>,
+        _cursor: Cursor,
+        _renderer: &Renderer,
+        _clipboard: &mut dyn Clipboard,
+        shell: &mut Shell<'_, Message>,
+        _viewport: &Rectangle
+    ) -> Status {
         shell.publish(self.message.clone());
         Status::Captured
     }
