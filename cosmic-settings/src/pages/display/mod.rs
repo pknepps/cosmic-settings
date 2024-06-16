@@ -619,11 +619,6 @@ impl Page {
             return Command::none();
         };
 
-        // TODO: Find current display position.
-        // Attempt?
-        let (current_x, current_y) = output.position;
-        set_dialog!(self, Randr::Position(current_x, current_y));
-
         output.position = (x, y);
 
         if cfg!(feature = "test") {
@@ -644,9 +639,6 @@ impl Page {
         if let Some(ref resolution) = self.config.resolution {
             if let Some(rates) = self.cache.modes.get(resolution) {
                 if let Some(&rate) = rates.get(option) {
-                    if let Some(current_rate) = self.config.refresh_rate {
-                        set_dialog!(self, Randr::RefreshRate(current_rate));
-                    }
                     self.cache.refresh_rate_selected = Some(option);
                     self.config.refresh_rate = Some(rate);
                     return self.exec_randr(output, Randr::RefreshRate(rate));
@@ -672,10 +664,6 @@ impl Page {
 
         let Some(&rate) = rates.first() else {
             return Command::none();
-        };
-
-        if let Some((current_width, current_height)) = self.config.resolution {
-            set_dialog!(self, Randr::Resolution(current_width, current_height));
         };
 
         self.config.refresh_rate = Some(rate);
