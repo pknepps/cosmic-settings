@@ -7,7 +7,8 @@ pub mod arrangement;
 use crate::{app, pages};
 use arrangement::Arrangement;
 use cosmic::iced::wayland::window::start_drag_window;
-use cosmic::iced::{ Alignment, Length, time };
+use cosmic::iced::{Alignment, Event, Length, Limits, Size, time};
+use cosmic::iced_core::{renderer, layout::{self, Layout}, Rectangle, mouse, widget::tree::Tree, Clipboard, Shell};
 use cosmic::iced_widget::scrollable::{Direction, Properties, RelativeOffset};
 use cosmic::prelude::CollectionWidget;
 use cosmic::widget::{
@@ -20,9 +21,13 @@ use slab::Slab;
 use slotmap::{Key, SlotMap};
 use std::{
     collections::BTreeMap,
-    process::ExitStatus, 
+    process::ExitStatus,
     sync::Arc,
 };
+use cosmic::iced::event::Status;
+use cosmic::iced::mouse::Cursor;
+use cosmic::iced_core::layout::Node;
+use cosmic::iced_core::renderer::Style;
 
 /// Display color depth options
 #[derive(Clone, Copy, Debug)]
@@ -123,14 +128,14 @@ pub struct Page {
     cache: ViewCache,
     //  context: Option<ContextDrawer>,
     display_arrangement_scrollable: cosmic::widget::Id,
-    /// The setting to revert to if the next dialog page is cancelled, and the 
-    /// instant the setting was changed.
+    /// The setting to revert to if the next dialog page is cancelled, and
+    /// the instant the setting was changed.
     dialog: Option<(Randr, time::Instant)>,
 }
 
 
 /// Causes a dialog to be shown. If the dialog fails, the revert_action will
-/// be performed. 
+/// be performed.
 /// The revert_action should be which Randr call will revert the setting change.
 //macro_rules! set_dialog {
 //    ($self: ident, $Randr: ident { $($revert_action: $kind) }) => {
@@ -310,10 +315,10 @@ impl page::Page<crate::pages::Message> for Page {
 
     /// Opens a dialog to confirm the display settings.
     ///
-    /// This dialog has a 10 (arbitrary) second counter which will 
+    /// This dialog has a 10 (arbitrary) second counter which will
     /// automatically revert to the original display settings when depleted.
-    /// 
-    /// To make a setting activate this dialog. Call the set_dialog  macto with 
+    ///
+    /// To make a setting activate this dialog. Call the set_dialog macro with
     /// the Randr enum value which undos the current change.
     fn dialog(&self) -> Option<Element<pages::Message>> {
         // An arbitrarily chosen amound of time (in seconds) in which the user
@@ -322,12 +327,16 @@ impl page::Page<crate::pages::Message> for Page {
         let Some((revert_request, start)) = self.dialog else {
             return None;
         };
+        let time_elapsed = start.elapsed();
+        if time_elapsed.as_secs() >= 11 {
+            return Some(ContinuousMessageStream::new(pages::Message::Displays(Message::DialogCancel(revert_request))).into());
+        }
         let dialog = widget::dialog(fl!("dialog", "title"))
             .body(fl!(
-                "dialog", 
-                "change-prompt", 
+                "dialog",
+                "change-prompt",
                 // Countdown
-                time = (DIALOG_CANCEL_TIME - start.elapsed()).as_secs()
+                time = (DIALOG_CANCEL_TIME - time_elapsed).as_secs()
             ))
             .primary_action(
                 widget::button::suggested(fl!("dialog", "keep-changes"))
@@ -595,7 +604,7 @@ impl Page {
         // TODO: Find current display position.
         // Attempt?
         let (current_x, current_y) = output.position;
-        self.dialog = Some((Randr::Position(current_x, current_y), time::Instant::now())); 
+        self.dialog = Some((Randr::Position(current_x, current_y), time::Instant::now()));
 
         output.position = (x, y);
 
@@ -603,7 +612,7 @@ impl Page {
             tracing::debug!("set position {x},{y}");
             return Command::none();
         }
-        
+
 
         let output = &self.list.outputs[display];
         self.exec_randr(output, Randr::Position(x, y))
@@ -947,4 +956,38 @@ pub async fn on_enter() -> crate::pages::Message {
     crate::pages::Message::Displays(Message::Update {
         randr: Arc::new(randr.await),
     })
+}
+
+
+struct ContinuousMessageStream<Message> {
+    message: Message,
+}
+
+impl<Message> ContinuousMessageStream<Message> {
+    fn new(message: Message) -> ContinuousMessageStream<Message> {
+        ContinuousMessageStream { message }
+    }
+}
+
+impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer> widget::Widget<Message, Theme, Renderer> for ContinuousMessageStream<Message> {
+    fn size(&self) -> Size<Length> {
+        Size::new(Length::Shrink, Length::Shrink)
+    }
+
+    fn layout(&self, _tree: &mut Tree, _renderer: &Renderer, _limits: &Limits) -> Node {
+        Node::new(Size::new(0f32, 0f32))
+    }
+
+    fn draw(&self, _tree: &Tree, _renderer: &mut Renderer, _theme: &Theme, _style: &Style, _layout: Layout<'_>, _cursor: Cursor, _viewport: &Rectangle) {}
+
+    fn on_event(&mut self, _state: &mut Tree, _event: Event, _layout: Layout<'_>, _cursor: Cursor, _renderer: &Renderer, _clipboard: &mut dyn Clipboard, shell: &mut Shell<'_, Message>, _viewport: &Rectangle) -> Status {
+        shell.publish(self.message.clone());
+        Status::Captured
+    }
+}
+
+impl<'a, Message: 'a + Clone> Into<Element<'a, Message>> for ContinuousMessageStream<Message> {
+    fn into(self) -> Element<'a, Message> {
+        Element::new(self)
+    }
 }
