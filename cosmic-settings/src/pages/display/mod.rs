@@ -6,28 +6,29 @@ pub mod arrangement;
 
 use crate::{app, pages};
 use arrangement::Arrangement;
+use cosmic::iced::event::Status;
+use cosmic::iced::mouse::Cursor;
 use cosmic::iced::wayland::window::start_drag_window;
-use cosmic::iced::{Alignment, Event, Length, Limits, Size, time};
-use cosmic::iced_core::{renderer, layout::{self, Layout}, Rectangle, mouse, widget::tree::Tree, Clipboard, Shell};
+use cosmic::iced::{time, Alignment, Event, Length, Limits, Size};
+use cosmic::iced_core::layout::Node;
+use cosmic::iced_core::renderer::Style;
+use cosmic::iced_core::{
+    layout::{self, Layout},
+    mouse, renderer,
+    widget::tree::Tree,
+    Clipboard, Rectangle, Shell,
+};
 use cosmic::iced_widget::scrollable::{Direction, Properties, RelativeOffset};
 use cosmic::prelude::CollectionWidget;
 use cosmic::widget::{
-    self, column, container, dropdown, list_column, segmented_button, tab_bar, toggler
+    self, column, container, dropdown, list_column, segmented_button, tab_bar, toggler,
 };
 use cosmic::{command, Apply, Command, Element};
 use cosmic_randr_shell::{List, Output, OutputKey, Transform};
 use cosmic_settings_page::{self as page, section, Section};
 use slab::Slab;
 use slotmap::{Key, SlotMap};
-use std::{
-    collections::BTreeMap,
-    process::ExitStatus,
-    sync::Arc,
-};
-use cosmic::iced::event::Status;
-use cosmic::iced::mouse::Cursor;
-use cosmic::iced_core::layout::Node;
-use cosmic::iced_core::renderer::Style;
+use std::{collections::BTreeMap, process::ExitStatus, sync::Arc};
 
 /// Display color depth options
 #[derive(Clone, Copy, Debug)]
@@ -133,14 +134,13 @@ pub struct Page {
     dialog: Option<(Randr, time::Instant)>,
 }
 
-
 /// Causes a dialog to be shown. If the dialog fails, the revert_action will
 /// be performed.
 /// The revert_action should be which Randr call will revert the setting change.
 //macro_rules! set_dialog {
 //    ($self: ident, $Randr: ident { $($revert_action: $kind) }) => {
-        //$self.dialog = Some(($revert_action, time::Instant::now()))
-    //};
+//$self.dialog = Some(($revert_action, time::Instant::now()))
+//};
 //}
 
 impl Default for Page {
@@ -329,7 +329,7 @@ impl page::Page<crate::pages::Message> for Page {
         };
         let time_elapsed = start.elapsed();
 
-        let dialog: impl Into<Element<pages::Message>> = if time_elapsed.as_secs() < 11 {
+        let element = if time_elapsed.as_secs() < 11 {
             widget::dialog(fl!("dialog", "title"))
                 .body(fl!(
                     "dialog",
@@ -339,18 +339,19 @@ impl page::Page<crate::pages::Message> for Page {
                 ))
                 .primary_action(
                     widget::button::suggested(fl!("dialog", "keep-changes"))
-                        .on_press(pages::Message::Displays(Message::DialogComplete))
+                        .on_press(pages::Message::Displays(Message::DialogComplete)),
                 )
                 .secondary_action(
-                    widget::button::standard(fl!("dialog", "revert-settings"))
-                        .on_press(pages::Message::Displays(Message::DialogCancel(revert_request)))
-                )
+                    widget::button::standard(fl!("dialog", "revert-settings")).on_press(
+                        pages::Message::Displays(Message::DialogCancel(revert_request)),
+                    ),
+                ).into()
         } else {
-            ContinuousMessageStream::new(
-                pages::Message::Displays(Message::DialogCancel(revert_request))
-            )
+            ContinuousMessageStream::new(pages::Message::Displays(Message::DialogCancel(
+                revert_request,
+            ))).into()
         };
-        Some(dialog.into())
+        Some(element)
     }
 }
 
@@ -366,7 +367,7 @@ impl Page {
                         crate::Message::PageMessage(on_enter().await)
                     });
                 }
-            },
+            }
 
             Message::DialogCancel(request) => {
                 let Some(output) = self.list.outputs.get(self.active_display) else {
@@ -374,11 +375,11 @@ impl Page {
                 };
                 self.dialog = None;
                 return self.exec_randr(output, request);
-            },
+            }
 
             Message::DialogComplete => {
                 self.dialog = None;
-            },
+            }
 
             Message::Display(display) => self.set_display(display),
 
@@ -617,7 +618,6 @@ impl Page {
             return Command::none();
         }
 
-
         let output = &self.list.outputs[display];
         self.exec_randr(output, Randr::Position(x, y))
     }
@@ -632,7 +632,8 @@ impl Page {
             if let Some(rates) = self.cache.modes.get(resolution) {
                 if let Some(&rate) = rates.get(option) {
                     if let Some(current_rate) = self.config.refresh_rate {
-                        self.dialog = Some((Randr::RefreshRate(current_rate), time::Instant::now()));
+                        self.dialog =
+                            Some((Randr::RefreshRate(current_rate), time::Instant::now()));
                     }
                     self.cache.refresh_rate_selected = Some(option);
                     self.config.refresh_rate = Some(rate);
@@ -662,7 +663,10 @@ impl Page {
         };
 
         if let Some((current_width, current_height)) = self.config.resolution {
-            self.dialog = Some((Randr::Resolution(current_width, current_height), time::Instant::now()));
+            self.dialog = Some((
+                Randr::Resolution(current_width, current_height),
+                time::Instant::now(),
+            ));
         };
 
         self.config.refresh_rate = Some(rate);
@@ -798,7 +802,6 @@ impl Page {
             app::Message::from(Message::RandrResult(Arc::new(command.status().await)))
         })
     }
-
 }
 
 /// View for the display arrangement section.
@@ -978,8 +981,8 @@ impl<Message> ContinuousMessageStream<Message> {
 }
 
 impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer>
-    widget::Widget<Message, Theme, Renderer> for ContinuousMessageStream<Message> {
-
+    widget::Widget<Message, Theme, Renderer> for ContinuousMessageStream<Message>
+{
     fn size(&self) -> Size<Length> {
         Size::new(Length::Shrink, Length::Shrink)
     }
@@ -996,8 +999,9 @@ impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer>
         _style: &Style,
         _layout: Layout<'_>,
         _cursor: Cursor,
-        _viewport: &Rectangle
-    ) {}
+        _viewport: &Rectangle,
+    ) {
+    }
 
     /// On any possible event, sends the message to the shell.
     fn on_event(
@@ -1009,7 +1013,7 @@ impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer>
         _renderer: &Renderer,
         _clipboard: &mut dyn Clipboard,
         shell: &mut Shell<'_, Message>,
-        _viewport: &Rectangle
+        _viewport: &Rectangle,
     ) -> Status {
         shell.publish(self.message.clone());
         Status::Captured
