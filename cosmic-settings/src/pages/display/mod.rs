@@ -328,24 +328,28 @@ impl page::Page<crate::pages::Message> for Page {
             return None;
         };
         let time_elapsed = start.elapsed();
-        if time_elapsed.as_secs() >= 11 {
-            return Some(ContinuousMessageStream::new(pages::Message::Displays(Message::DialogCancel(revert_request))).into());
-        }
-        let dialog = widget::dialog(fl!("dialog", "title"))
-            .body(fl!(
+
+        let dialog: impl Into<Element<pages::Message>> = if time_elapsed.as_secs() < 11 {
+            widget::dialog(fl!("dialog", "title"))
+                .body(fl!(
                 "dialog",
                 "change-prompt",
                 // Countdown
                 time = (DIALOG_CANCEL_TIME - time_elapsed).as_secs()
             ))
-            .primary_action(
-                widget::button::suggested(fl!("dialog", "keep-changes"))
-                    .on_press(pages::Message::Displays(Message::DialogComplete))
-            )
-            .secondary_action(
-                widget::button::standard(fl!("dialog", "revert-settings"))
-                    .on_press(pages::Message::Displays(Message::DialogCancel(revert_request)))
-            );
+                .primary_action(
+                    widget::button::suggested(fl!("dialog", "keep-changes"))
+                        .on_press(pages::Message::Displays(Message::DialogComplete))
+                )
+                .secondary_action(
+                    widget::button::standard(fl!("dialog", "revert-settings"))
+                        .on_press(pages::Message::Displays(Message::DialogCancel(revert_request)))
+                )
+        } else {
+             ContinuousMessageStream::new(
+                 pages::Message::Displays(Message::DialogCancel(revert_request))
+             )
+        };
         Some(dialog.into())
     }
 }
@@ -958,12 +962,16 @@ pub async fn on_enter() -> crate::pages::Message {
     })
 }
 
-
+/// A Widget which sends a continuous stream of the given message to the shell.
+///
+/// It is invisible and is meant to be used in a situation in which the user
+/// wants an event to happen immediately and no matter what.
 struct ContinuousMessageStream<Message> {
     message: Message,
 }
 
 impl<Message> ContinuousMessageStream<Message> {
+    /// Creates a new ContinuousMessageStream which will send the given message.
     fn new(message: Message) -> ContinuousMessageStream<Message> {
         ContinuousMessageStream { message }
     }
@@ -987,6 +995,7 @@ impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer> widget::Widge
 }
 
 impl<'a, Message: 'a + Clone> Into<Element<'a, Message>> for ContinuousMessageStream<Message> {
+    /// Converts the ContinuousMessageStream into an Element<Message>.
     fn into(self) -> Element<'a, Message> {
         Element::new(self)
     }
