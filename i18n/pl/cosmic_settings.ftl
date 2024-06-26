@@ -362,7 +362,7 @@ acceleration-desc = Automatycznie dostosuj dokładność śledzenia do prędkoś
 
 disable-while-typing = Wyłącz podczas pisania
 
-input = Urządzenia do Wprowadzania Danych
+input-devices = Urządzenia do Wprowadzania Danych
     .desc = Urządzenia do Wprowadzania Danych
     
 primary-button = Główny przycisk
@@ -432,7 +432,7 @@ touchpad = Gładzik
     
 ## Input: Gestures
 
-swiping = Przesuwanie
+gestures = Gesty
     .four-finger-down = Przesunięcie czterema palcami w dół
     .four-finger-left = Przesunięcie czterema palcami w lewo
     .four-finger-right = Przesunięcie czterema palcami w prawo
@@ -450,7 +450,7 @@ open-workspaces-view = Otwarcie podglądu obszarów roboczych
 power = Zasilanie
   .desc = Zarządzaj ustawieniami zasilania
 
-power-profiles = Profile Zasilania
+power-mode = Profile Zasilania
   .performance = Tryb Wysokowydajny
   .balanced = Tryb Zbalansowany
   .battery = Tryb Oszczędzania Energii

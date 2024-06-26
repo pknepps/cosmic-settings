@@ -302,7 +302,7 @@ sound-input = Entrada
     .device = Dispositivo de entrada
     .level = Nível de entrada
 
-sound-alerts = Aletras
+sound-alerts = Alertas
     .volume = Volume dos alertas
     .sound = Som dos alertas
 
@@ -394,7 +394,7 @@ keyboard-typing-assist = Digitação
     .repeat-delay = Taxa de atraso
 
 added = Adicionado
-type-to-search = TEscreva para procurar...
+type-to-search = Digite para pesquisar...
 
 ## Input: Keyboard: Shortcuts
 
