@@ -31,8 +31,6 @@ use slotmap::{Key, SlotMap};
 use std::thread::current;
 use std::{collections::BTreeMap, process::ExitStatus, sync::Arc};
 
-static MAX_DIALOG_COUNTDOWN: usize = 10;
-
 /// Display color depth options
 #[derive(Clone, Copy, Debug)]
 pub struct ColorDepth(usize);
@@ -114,7 +112,7 @@ impl From<Message> for app::Message {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Randr {
     Position(i32, i32),
     RefreshRate(u32),
@@ -317,7 +315,7 @@ impl page::Page<crate::pages::Message> for Page {
     /// automatically revert to the original display settings when depleted.
     ///
     /// To make a setting activate this dialog. Call the set_dialog method with
-    /// the Randr enum value which undos the current change. Makde sure the 
+    /// the Randr enum value which undos the current change. Makde sure the
     /// return value is returned with the exec_value return value within a batch
     /// command.
     fn dialog(&self) -> Option<Element<pages::Message>> {
@@ -326,26 +324,22 @@ impl page::Page<crate::pages::Message> for Page {
         };
 
         let element = widget::dialog(fl!("dialog", "title"))
-                .body(fl!(
-                    "dialog",
-                    "change-prompt",
-                    time = self.dialog_countdown
-                ))
-                .primary_action(
-                    widget::button::suggested(fl!("dialog", "keep-changes"))
-                        .on_press(pages::Message::Displays(Message::DialogComplete)),
-                )
-                .secondary_action(
-                    widget::button::standard(fl!("dialog", "revert-settings")).on_press(
-                        pages::Message::Displays(Message::DialogCancel(revert_request)),
-                    ),
-                ).into();
+            .body(fl!("dialog", "change-prompt", time = self.dialog_countdown))
+            .primary_action(
+                widget::button::suggested(fl!("dialog", "keep-changes"))
+                    .on_press(pages::Message::Displays(Message::DialogComplete)),
+            )
+            .secondary_action(
+                widget::button::standard(fl!("dialog", "revert-settings")).on_press(
+                    pages::Message::Displays(Message::DialogCancel(revert_request)),
+                ),
+            )
+            .into();
         Some(element)
     }
 }
 
 impl Page {
-
     pub fn update(&mut self, message: Message) -> Command<app::Message> {
         match message {
             Message::RandrResult(result) => {
@@ -364,17 +358,21 @@ impl Page {
                     return Command::none();
                 };
                 self.dialog = None;
+                self.dialog_countdown = 0;
                 return self.exec_randr(output, request);
             }
 
             Message::DialogComplete => {
                 self.dialog = None;
+                self.dialog_countdown = 0;
             }
 
             Message::DialogCountdown => {
                 if self.dialog_countdown == 0 {
                     if let Some(request) = self.dialog {
-                        return command::message(app::Message::from(Message::DialogCancel(request)));
+                        return command::message(app::Message::from(Message::DialogCancel(
+                            request,
+                        )));
                     }
                 } else {
                     self.dialog_countdown -= 1;
@@ -494,10 +492,18 @@ impl Page {
         self.set_display(self.display_tabs.active());
     }
 
-    /// Sets the dialog to be shown to the user.
-    fn set_dialog(&mut self, randr: Randr) -> Command<app::Message> {
-        self.dialog = Some(randr);
-        self.dialog_countdown = MAX_DIALOG_COUNTDOWN;
+    /// Sets the dialog to be shown to the user. Will not show a dialog if the
+    /// current request does not change anything.
+    fn set_dialog(
+        &mut self,
+        revert_request: Randr,
+        current_request: &Randr,
+    ) -> Command<app::Message> {
+        if revert_request == *current_request {
+            return Command::none();
+        }
+        self.dialog = Some(revert_request);
+        self.dialog_countdown = 10;
         command::future(async {
             tokio::time::sleep(time::Duration::from_secs(1)).await;
             app::Message::from(Message::DialogCountdown)
@@ -590,17 +596,18 @@ impl Page {
 
     /// Change display orientation.
     pub fn set_orientation(&mut self, transform: Transform) -> Command<app::Message> {
+        let request = Randr::Transform(transform);
+
         let mut commands = Vec::with_capacity(2);
         commands.push(match self.cache.orientation_selected {
             Some(orientation) => self.set_dialog(
-                Randr::Transform(
-                    match orientation {
-                        1 => Transform::Rotate90,
-                        2 => Transform::Flipped180,
-                        3 => Transform::Flipped270,
-                        _ => Transform::Normal,
-                    }
-                )
+                Randr::Transform(match orientation {
+                    1 => Transform::Rotate90,
+                    2 => Transform::Flipped180,
+                    3 => Transform::Flipped270,
+                    _ => Transform::Normal,
+                }),
+                &request,
             ),
             None => Command::none(),
         });
@@ -615,6 +622,7 @@ impl Page {
             Transform::Rotate180 => Some(2),
             _ => Some(3),
         };
+
         commands.push(self.exec_randr(output, Randr::Transform(transform)));
 
         Command::batch(commands)
@@ -639,11 +647,6 @@ impl Page {
 
     /// Changes the refresh rate of the active display.
     pub fn set_refresh_rate(&mut self, option: usize) -> Command<app::Message> {
-        let mut commands = Vec::with_capacity(2);
-        if let Some(current_rate) = self.config.refresh_rate {
-            commands.push(self.set_dialog(Randr::RefreshRate(current_rate)));
-        }
-
         let Some(output) = self.list.outputs.get(self.active_display) else {
             return Command::none();
         };
@@ -653,8 +656,7 @@ impl Page {
                 if let Some(&rate) = rates.get(option) {
                     self.cache.refresh_rate_selected = Some(option);
                     self.config.refresh_rate = Some(rate);
-                    commands.push(self.exec_randr(output, Randr::RefreshRate(rate)));
-                    Command::batch(commands);
+                    return self.exec_randr(output, Randr::RefreshRate(rate));
                 }
             }
         }
@@ -681,10 +683,10 @@ impl Page {
             return Command::none();
         };
 
-        if Some(resolution) != self.config.resolution {
-            if let Some(current) =  self.config.resolution {
-                commands.push(self.set_dialog(Randr::Resolution(current.0, current.1)));
-            }
+        let request = Randr::Resolution(resolution.0, resolution.1);
+        let mut revert_request = request;
+        if let Some(resolution) = self.config.resolution {
+            revert_request = Randr::Resolution(resolution.0, resolution.1);
         }
 
         self.config.refresh_rate = Some(rate);
@@ -692,6 +694,7 @@ impl Page {
         self.cache.refresh_rate_selected = Some(0);
         self.cache.resolution_selected = Some(option);
         commands.push(self.exec_randr(output, Randr::Resolution(resolution.0, resolution.1)));
+        commands.push(self.set_dialog(revert_request, &request));
 
         Command::batch(commands)
     }
@@ -699,7 +702,6 @@ impl Page {
     /// Set the scale of the active display.
     pub fn set_scale(&mut self, option: usize) -> Command<app::Message> {
         let mut commands = Vec::with_capacity(2);
-        commands.push(self.set_dialog(Randr::Scale(self.config.scale)));
 
         let Some(output) = self.list.outputs.get(self.active_display) else {
             return Command::none();
@@ -707,29 +709,47 @@ impl Page {
 
         let scale = (option * 25 + 50) as u32;
 
+        let request = Randr::Scale(scale);
+        let revert_request = Randr::Scale(self.config.scale);
+
         self.cache.scale_selected = Some(option);
         self.config.scale = scale;
         commands.push(self.exec_randr(output, Randr::Scale(scale)));
+        commands.push(self.set_dialog(revert_request, &request));
         Command::batch(commands)
     }
 
     /// Enables or disables the active display.
     pub fn toggle_display(&mut self, enable: bool) -> Command<app::Message> {
         let mut commands = Vec::with_capacity(2);
+        let request = Randr::Toggle(enable);
+
         let Some(output) = self.list.outputs.get_mut(self.active_display) else {
             return Command::none();
         };
 
+        let revert_request = Randr::Toggle(output.enabled);
+        let current_request = request;
+
         output.enabled = enable;
 
         let output = &self.list.outputs[self.active_display];
-        commands.push(self.exec_randr(output, Randr::Toggle(output.enabled)));
-        commands.push(self.set_dialog(Randr::Toggle(output.enabled)));
+        commands.push(self.exec_randr(output, request));
+        commands.push(self.set_dialog(revert_request, &current_request));
         Command::batch(commands)
     }
 
     /// Applies a display configuration via `cosmic-randr`.
     fn exec_randr(&self, output: &Output, request: Randr) -> Command<app::Message> {
+        let mut commands = Vec::with_capacity(2);
+
+        // Removes the dialog if no change is being made
+        if Some(request) == self.dialog {
+            commands.push(command::message(app::Message::from(
+                Message::DialogComplete,
+            )));
+        }
+
         let name = &*output.name;
         let mut command = tokio::process::Command::new("cosmic-randr");
 
@@ -821,10 +841,11 @@ impl Page {
             }
         }
 
-        cosmic::command::future(async move {
+        commands.push(cosmic::command::future(async move {
             tracing::debug!(?command, "executing");
             app::Message::from(Message::RandrResult(Arc::new(command.status().await)))
-        })
+        }));
+        Command::batch(commands)
     }
 }
 
