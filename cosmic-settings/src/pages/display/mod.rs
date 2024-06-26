@@ -30,6 +30,8 @@ use slab::Slab;
 use slotmap::{Key, SlotMap};
 use std::{collections::BTreeMap, process::ExitStatus, sync::Arc};
 
+static MAX_DIALOG_COUNTDOWN: usize = 10;
+
 /// Display color depth options
 #[derive(Clone, Copy, Debug)]
 pub struct ColorDepth(usize);
@@ -76,7 +78,7 @@ pub enum Message {
     /// The dialog was completed.
     DialogComplete,
     /// How long until the dialog automatically cancelles, in seconds.
-    DialogCountdown(usize),
+    DialogCountdown,
     /// Toggles display on or off.
     DisplayToggle(bool),
     /// Configures mirroring status of a display.
@@ -314,7 +316,9 @@ impl page::Page<crate::pages::Message> for Page {
     /// automatically revert to the original display settings when depleted.
     ///
     /// To make a setting activate this dialog. Call the set_dialog method with
-    /// the Randr enum value which undos the current change.
+    /// the Randr enum value which undos the current change. Makde sure the 
+    /// return value is returned with the exec_value return value within a batch
+    /// command.
     fn dialog(&self) -> Option<Element<pages::Message>> {
         let Some(revert_request) = self.dialog else {
             return None;
@@ -366,17 +370,16 @@ impl Page {
                 self.dialog = None;
             }
 
-            Message::DialogCountdown(countdown) => {
-                if countdown == 0 {
-                    self.dialog = None;
+            Message::DialogCountdown => {
+                if self.dialog_countdown == 0 {
                     if let Some(request) = self.dialog {
                         return command::message(app::Message::from(Message::DialogCancel(request)));
                     }
                 } else {
-                    self.dialog_countdown = countdown;
+                    self.dialog_countdown -= 1;
                     return command::future(async move {
                         tokio::time::sleep(time::Duration::from_secs(1)).await;
-                        Message::DialogCountdown(countdown - 1)
+                        Message::DialogCountdown
                     });
                 }
             }
@@ -491,11 +494,12 @@ impl Page {
     }
 
     /// Sets the dialog to be shown to the user.
-    fn set_dialog(&mut self, randr: Randr) -> Command<pages::display::Message> {
+    fn set_dialog(&mut self, randr: Randr) -> Command<app::Message> {
         self.dialog = Some(randr);
+        self.dialog_countdown = MAX_DIALOG_COUNTDOWN;
         command::future(async {
             tokio::time::sleep(time::Duration::from_secs(1)).await;
-            Message::DialogCountdown(10)
+            app::Message::from(Message::DialogCountdown)
         })
     }
 
@@ -585,15 +589,20 @@ impl Page {
 
     /// Change display orientation.
     pub fn set_orientation(&mut self, transform: Transform) -> Command<app::Message> {
-        if let Some(orientation) = self.cache.orientation_selected {
-            let current_orientation = match orientation {
-                1 => Transform::Rotate90,
-                2 => Transform::Flipped180,
-                3 => Transform::Flipped270,
-                _ => Transform::Normal,
-            };
-            self.set_dialog(Randr::Transform(current_orientation));
-        }
+        let mut commands = Vec::new();
+        commands.push(match self.cache.orientation_selected {
+            Some(orientation) => self.set_dialog(
+                Randr::Transform(
+                    match orientation {
+                        1 => Transform::Rotate90,
+                        2 => Transform::Flipped180,
+                        3 => Transform::Flipped270,
+                        _ => Transform::Normal,
+                    }
+                )
+            ),
+            None => Command::none(),
+        });
 
         let Some(output) = self.list.outputs.get(self.active_display) else {
             return Command::none();
@@ -605,8 +614,9 @@ impl Page {
             Transform::Rotate180 => Some(2),
             _ => Some(3),
         };
+        commands.push(self.exec_randr(output, Randr::Transform(transform)));
 
-        self.exec_randr(output, Randr::Transform(transform))
+        Command::batch(commands)
     }
 
     /// Changes the position of the display.
@@ -671,7 +681,8 @@ impl Page {
 
     /// Set the scale of the active display.
     pub fn set_scale(&mut self, option: usize) -> Command<app::Message> {
-        self.set_dialog(Randr::Scale(self.config.scale));
+        let mut commands = Vec::new();
+        commands.push(self.set_dialog(Randr::Scale(self.config.scale)));
 
         let Some(output) = self.list.outputs.get(self.active_display) else {
             return Command::none();
@@ -681,11 +692,13 @@ impl Page {
 
         self.cache.scale_selected = Some(option);
         self.config.scale = scale;
-        self.exec_randr(output, Randr::Scale(scale))
+        commands.push(self.exec_randr(output, Randr::Scale(scale)));
+        Command::batch(commands)
     }
 
     /// Enables or disables the active display.
     pub fn toggle_display(&mut self, enable: bool) -> Command<app::Message> {
+        let mut commands = Vec::new();
         let Some(output) = self.list.outputs.get_mut(self.active_display) else {
             return Command::none();
         };
@@ -693,11 +706,9 @@ impl Page {
         output.enabled = enable;
 
         let output = &self.list.outputs[self.active_display];
-        let command = self.exec_randr(output, Randr::Toggle(output.enabled));
-
-        self.set_dialog(Randr::Toggle(output.enabled));
-
-        command
+        commands.push(self.exec_randr(output, Randr::Toggle(output.enabled)));
+        commands.push(self.set_dialog(Randr::Toggle(output.enabled)));
+        Command::batch(commands)
     }
 
     /// Applies a display configuration via `cosmic-randr`.
