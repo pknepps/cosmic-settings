@@ -75,6 +75,8 @@ pub enum Message {
     DialogCancel(Randr),
     /// The dialog was completed.
     DialogComplete,
+    /// How long until the dialog automatically cancelles, in seconds.
+    DialogCountdown(usize),
     /// Toggles display on or off.
     DisplayToggle(bool),
     /// Configures mirroring status of a display.
@@ -129,30 +131,10 @@ pub struct Page {
     cache: ViewCache,
     //  context: Option<ContextDrawer>,
     display_arrangement_scrollable: cosmic::widget::Id,
-    /// The setting to revert to if the next dialog page is cancelled, and
+    /// The setting to revert to if the next dialog page is cancelled.
+    dialog: Option<Randr>,
     /// the instant the setting was changed.
-    dialog: Option<(Randr, time::Instant)>,
-}
-
-/// Causes a dialog to be shown. If the dialog fails, the revert_action will
-/// be performed.
-/// The revert_action should be which Randr call will revert the setting change.
-/// # Example
-/// ```
-/// fn set_scale(&mut self, scale: usize) -> Command<app::Message> {
-///
-///     // Sets the action to undo to the current value of the scale
-///     let revert_action = Randr::Scale(self.config.scale);
-///     set_dialog!(self, revert_action);
-///
-///     self.config.scale = scale;
-///     self.exec_randr(Randr::Scale(scale))
-/// }
-/// ```
-macro_rules! set_dialog {
-    ($self: ident, $revert_action: expr) => {
-        $self.dialog = Some(($revert_action, time::Instant::now()))
-    };
+    dialog_countdown: usize,
 }
 
 impl Default for Page {
@@ -167,6 +149,7 @@ impl Default for Page {
             //          context: None,
             display_arrangement_scrollable: cosmic::widget::Id::unique(),
             dialog: None,
+            dialog_countdown: 0,
         }
     }
 }
@@ -330,24 +313,18 @@ impl page::Page<crate::pages::Message> for Page {
     /// This dialog has a 10 (arbitrary) second counter which will
     /// automatically revert to the original display settings when depleted.
     ///
-    /// To make a setting activate this dialog. Call the set_dialog macro with
+    /// To make a setting activate this dialog. Call the set_dialog method with
     /// the Randr enum value which undos the current change.
     fn dialog(&self) -> Option<Element<pages::Message>> {
-        // An arbitrarily chosen amound of time (in seconds) in which the user
-        // has to confirm the new display settings before reverting.
-        const DIALOG_CANCEL_TIME: time::Duration = time::Duration::from_secs(11);
-        let Some((revert_request, start)) = self.dialog else {
+        let Some(revert_request) = self.dialog else {
             return None;
         };
-        let time_elapsed = start.elapsed();
 
-        let element = if time_elapsed.as_secs() < 11 {
-            widget::dialog(fl!("dialog", "title"))
+        let element = widget::dialog(fl!("dialog", "title"))
                 .body(fl!(
                     "dialog",
                     "change-prompt",
-                    // Countdown
-                    time = (DIALOG_CANCEL_TIME - time_elapsed).as_secs()
+                    time = self.dialog_countdown
                 ))
                 .primary_action(
                     widget::button::suggested(fl!("dialog", "keep-changes"))
@@ -357,12 +334,7 @@ impl page::Page<crate::pages::Message> for Page {
                     widget::button::standard(fl!("dialog", "revert-settings")).on_press(
                         pages::Message::Displays(Message::DialogCancel(revert_request)),
                     ),
-                ).into()
-        } else {
-            ContinuousMessageStream::new(pages::Message::Displays(Message::DialogCancel(
-                revert_request,
-            ))).into()
-        };
+                ).into();
         Some(element)
     }
 }
@@ -392,6 +364,21 @@ impl Page {
 
             Message::DialogComplete => {
                 self.dialog = None;
+            }
+
+            Message::DialogCountdown(countdown) => {
+                if countdown == 0 {
+                    self.dialog = None;
+                    if let Some(request) = self.dialog {
+                        return command::message(app::Message::from(Message::DialogCancel(request)));
+                    }
+                } else {
+                    self.dialog_countdown = countdown;
+                    return command::future(async move {
+                        tokio::time::sleep(time::Duration::from_secs(1)).await;
+                        Message::DialogCountdown(countdown - 1)
+                    });
+                }
             }
 
             Message::Display(display) => self.set_display(display),
@@ -503,6 +490,15 @@ impl Page {
         self.set_display(self.display_tabs.active());
     }
 
+    /// Sets the dialog to be shown to the user.
+    fn set_dialog(&mut self, randr: Randr) -> Command<pages::display::Message> {
+        self.dialog = Some(randr);
+        command::future(async {
+            tokio::time::sleep(time::Duration::from_secs(1)).await;
+            Message::DialogCountdown(10)
+        })
+    }
+
     /// Changes the color depth of the active display.
     pub fn set_color_depth(&mut self, depth: ColorDepth) -> Command<app::Message> {
         unimplemented!()
@@ -589,10 +585,6 @@ impl Page {
 
     /// Change display orientation.
     pub fn set_orientation(&mut self, transform: Transform) -> Command<app::Message> {
-        let Some(output) = self.list.outputs.get(self.active_display) else {
-            return Command::none();
-        };
-
         if let Some(orientation) = self.cache.orientation_selected {
             let current_orientation = match orientation {
                 1 => Transform::Rotate90,
@@ -600,8 +592,12 @@ impl Page {
                 3 => Transform::Flipped270,
                 _ => Transform::Normal,
             };
-            set_dialog!(self, Randr::Transform(current_orientation));
+            self.set_dialog(Randr::Transform(current_orientation));
         }
+
+        let Some(output) = self.list.outputs.get(self.active_display) else {
+            return Command::none();
+        };
 
         self.cache.orientation_selected = match transform {
             Transform::Normal => Some(0),
@@ -675,13 +671,13 @@ impl Page {
 
     /// Set the scale of the active display.
     pub fn set_scale(&mut self, option: usize) -> Command<app::Message> {
+        self.set_dialog(Randr::Scale(self.config.scale));
+
         let Some(output) = self.list.outputs.get(self.active_display) else {
             return Command::none();
         };
 
         let scale = (option * 25 + 50) as u32;
-
-        set_dialog!(self, Randr::Scale(self.config.scale));
 
         self.cache.scale_selected = Some(option);
         self.config.scale = scale;
@@ -696,10 +692,12 @@ impl Page {
 
         output.enabled = enable;
 
-        set_dialog!(self, Randr::Toggle(!output.enabled));
-
         let output = &self.list.outputs[self.active_display];
-        self.exec_randr(output, Randr::Toggle(output.enabled))
+        let command = self.exec_randr(output, Randr::Toggle(output.enabled));
+
+        self.set_dialog(Randr::Toggle(output.enabled));
+
+        command
     }
 
     /// Applies a display configuration via `cosmic-randr`.
@@ -961,66 +959,4 @@ pub async fn on_enter() -> crate::pages::Message {
     crate::pages::Message::Displays(Message::Update {
         randr: Arc::new(randr.await),
     })
-}
-
-/// A Widget which sends a continuous stream of the given message to the shell.
-///
-/// It is invisible and is meant to be used in a situation in which the user
-/// wants an event to happen immediately and no matter what.
-struct ContinuousMessageStream<Message> {
-    message: Message,
-}
-
-impl<Message> ContinuousMessageStream<Message> {
-    /// Creates a ContinuousMessageStream which will send the given message.
-    fn new(message: Message) -> ContinuousMessageStream<Message> {
-        ContinuousMessageStream { message }
-    }
-}
-
-impl<Message: Clone, Theme, Renderer: cosmic::iced_core::Renderer>
-    widget::Widget<Message, Theme, Renderer> for ContinuousMessageStream<Message>
-{
-    fn size(&self) -> Size<Length> {
-        Size::new(Length::Shrink, Length::Shrink)
-    }
-
-    fn layout(&self, _tree: &mut Tree, _renderer: &Renderer, _limits: &Limits) -> Node {
-        Node::new(Size::new(0f32, 0f32))
-    }
-
-    fn draw(
-        &self,
-        _tree: &Tree,
-        _renderer: &mut Renderer,
-        _theme: &Theme,
-        _style: &Style,
-        _layout: Layout<'_>,
-        _cursor: Cursor,
-        _viewport: &Rectangle,
-    ) {
-    }
-
-    /// On any possible event, sends the message to the shell.
-    fn on_event(
-        &mut self,
-        _state: &mut Tree,
-        _event: Event,
-        _layout: Layout<'_>,
-        _cursor: Cursor,
-        _renderer: &Renderer,
-        _clipboard: &mut dyn Clipboard,
-        shell: &mut Shell<'_, Message>,
-        _viewport: &Rectangle,
-    ) -> Status {
-        shell.publish(self.message.clone());
-        Status::Captured
-    }
-}
-
-impl<'a, Message: 'a + Clone> Into<Element<'a, Message>> for ContinuousMessageStream<Message> {
-    /// Converts the ContinuousMessageStream into an Element<Message>.
-    fn into(self) -> Element<'a, Message> {
-        Element::new(self)
-    }
 }
