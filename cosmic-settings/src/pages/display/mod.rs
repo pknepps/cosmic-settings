@@ -28,6 +28,7 @@ use cosmic_randr_shell::{List, Output, OutputKey, Transform};
 use cosmic_settings_page::{self as page, section, Section};
 use slab::Slab;
 use slotmap::{Key, SlotMap};
+use std::thread::current;
 use std::{collections::BTreeMap, process::ExitStatus, sync::Arc};
 
 static MAX_DIALOG_COUNTDOWN: usize = 10;
@@ -589,7 +590,7 @@ impl Page {
 
     /// Change display orientation.
     pub fn set_orientation(&mut self, transform: Transform) -> Command<app::Message> {
-        let mut commands = Vec::new();
+        let mut commands = Vec::with_capacity(2);
         commands.push(match self.cache.orientation_selected {
             Some(orientation) => self.set_dialog(
                 Randr::Transform(
@@ -638,6 +639,11 @@ impl Page {
 
     /// Changes the refresh rate of the active display.
     pub fn set_refresh_rate(&mut self, option: usize) -> Command<app::Message> {
+        let mut commands = Vec::with_capacity(2);
+        if let Some(current_rate) = self.config.refresh_rate {
+            commands.push(self.set_dialog(Randr::RefreshRate(current_rate)));
+        }
+
         let Some(output) = self.list.outputs.get(self.active_display) else {
             return Command::none();
         };
@@ -647,7 +653,8 @@ impl Page {
                 if let Some(&rate) = rates.get(option) {
                     self.cache.refresh_rate_selected = Some(option);
                     self.config.refresh_rate = Some(rate);
-                    return self.exec_randr(output, Randr::RefreshRate(rate));
+                    commands.push(self.exec_randr(output, Randr::RefreshRate(rate)));
+                    Command::batch(commands);
                 }
             }
         }
@@ -657,6 +664,8 @@ impl Page {
 
     /// Change the resolution of the active display.
     pub fn set_resolution(&mut self, option: usize) -> Command<app::Message> {
+        let mut commands = Vec::with_capacity(2);
+
         let Some(output) = self.list.outputs.get(self.active_display) else {
             return Command::none();
         };
@@ -672,16 +681,24 @@ impl Page {
             return Command::none();
         };
 
+        if Some(resolution) != self.config.resolution {
+            if let Some(current) =  self.config.resolution {
+                commands.push(self.set_dialog(Randr::Resolution(current.0, current.1)));
+            }
+        }
+
         self.config.refresh_rate = Some(rate);
         self.config.resolution = Some(resolution);
         self.cache.refresh_rate_selected = Some(0);
         self.cache.resolution_selected = Some(option);
-        self.exec_randr(output, Randr::Resolution(resolution.0, resolution.1))
+        commands.push(self.exec_randr(output, Randr::Resolution(resolution.0, resolution.1)));
+
+        Command::batch(commands)
     }
 
     /// Set the scale of the active display.
     pub fn set_scale(&mut self, option: usize) -> Command<app::Message> {
-        let mut commands = Vec::new();
+        let mut commands = Vec::with_capacity(2);
         commands.push(self.set_dialog(Randr::Scale(self.config.scale)));
 
         let Some(output) = self.list.outputs.get(self.active_display) else {
@@ -698,7 +715,7 @@ impl Page {
 
     /// Enables or disables the active display.
     pub fn toggle_display(&mut self, enable: bool) -> Command<app::Message> {
-        let mut commands = Vec::new();
+        let mut commands = Vec::with_capacity(2);
         let Some(output) = self.list.outputs.get_mut(self.active_display) else {
             return Command::none();
         };
