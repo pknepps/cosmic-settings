@@ -6,18 +6,7 @@ pub mod arrangement;
 
 use crate::{app, pages};
 use arrangement::Arrangement;
-use cosmic::iced::event::Status;
-use cosmic::iced::mouse::Cursor;
-use cosmic::iced::wayland::window::start_drag_window;
-use cosmic::iced::{time, Alignment, Event, Length, Limits, Size};
-use cosmic::iced_core::layout::Node;
-use cosmic::iced_core::renderer::Style;
-use cosmic::iced_core::{
-    layout::{self, Layout},
-    mouse, renderer,
-    widget::tree::Tree,
-    Clipboard, Rectangle, Shell,
-};
+use cosmic::iced::{time, Alignment, Length};
 use cosmic::iced_widget::scrollable::{Direction, Properties, RelativeOffset};
 use cosmic::prelude::CollectionWidget;
 use cosmic::widget::{
@@ -28,7 +17,6 @@ use cosmic_randr_shell::{List, Output, OutputKey, Transform};
 use cosmic_settings_page::{self as page, section, Section};
 use slab::Slab;
 use slotmap::{Key, SlotMap};
-use std::thread::current;
 use std::{collections::BTreeMap, process::ExitStatus, sync::Arc};
 
 /// Display color depth options
@@ -72,8 +60,8 @@ pub enum Message {
     ColorDepth(ColorDepth),
     /// Set the color profile of a display.
     ColorProfile(usize),
-    /// The dialog was cancelled, and will revert setting to the given request.
-    DialogCancel(Randr),
+    /// The dialog was cancelled, and will revert settings.
+    DialogCancel,
     /// The dialog was completed.
     DialogComplete,
     /// How long until the dialog automatically cancelles, in seconds.
@@ -314,15 +302,12 @@ impl page::Page<crate::pages::Message> for Page {
     /// This dialog has a 10 (arbitrary) second counter which will
     /// automatically revert to the original display settings when depleted.
     ///
-    /// To make a setting activate this dialog. Call the set_dialog method with
+    /// To make a setting activate this dialog. Call the `set_dialog` method with
     /// the Randr enum value which undos the current change. Makde sure the
-    /// return value is returned with the exec_value return value within a batch
+    /// return value is returned with the `exec_value` return value within a batch
     /// command.
     fn dialog(&self) -> Option<Element<pages::Message>> {
-        let Some(revert_request) = self.dialog else {
-            return None;
-        };
-
+        self.dialog?;
         let element = widget::dialog(fl!("dialog", "title"))
             .body(fl!("dialog", "change-prompt", time = self.dialog_countdown))
             .primary_action(
@@ -331,7 +316,7 @@ impl page::Page<crate::pages::Message> for Page {
             )
             .secondary_action(
                 widget::button::standard(fl!("dialog", "revert-settings")).on_press(
-                    pages::Message::Displays(Message::DialogCancel(revert_request)),
+                    pages::Message::Displays(Message::DialogCancel),
                 ),
             )
             .into();
@@ -353,7 +338,10 @@ impl Page {
                 }
             }
 
-            Message::DialogCancel(request) => {
+            Message::DialogCancel => {
+                let Some(request) = self.dialog else {
+                    return Command::none();
+                };
                 let Some(output) = self.list.outputs.get(self.active_display) else {
                     return Command::none();
                 };
@@ -370,9 +358,7 @@ impl Page {
             Message::DialogCountdown => {
                 if self.dialog_countdown == 0 {
                     if let Some(request) = self.dialog {
-                        return command::message(app::Message::from(Message::DialogCancel(
-                            request,
-                        )));
+                        return command::message(app::Message::from(Message::DialogCancel));
                     }
                 } else {
                     self.dialog_countdown -= 1;
